@@ -1,0 +1,9 @@
+# Install once (needs internet just for this step), then the app runs offline.
+#   python -m pip install -r requirements.txt
+flask>=3.0
+pandas>=2.1
+openpyxl>=3.1      # only needed to read .xlsx / .xlsm MRP lists
+
+# Production WSGI server, used only when hosting (e.g. Render). The marker
+# keeps it out of local Windows installs, where it cannot run anyway.
+gunicorn>=21.2; sys_platform != "win32"

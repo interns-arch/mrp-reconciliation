@@ -1,0 +1,24 @@
+# Render Blueprint. In Render: New -> Blueprint -> pick this repo.
+#
+# One worker on purpose: uploaded files and results live in this process's
+# memory, so a second worker would answer requests that know nothing about the
+# files you just uploaded. Scale up the instance, never the worker count.
+services:
+  - type: web
+    name: mrp-reconciliation
+    runtime: python
+    plan: starter            # 512 MB RAM. See DEPLOY.md before choosing.
+    region: singapore        # nearest to India; oregon/frankfurt also available
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app --workers 1 --threads 4 --timeout 600 --bind 0.0.0.0:$PORT
+    healthCheckPath: /api/mode
+    autoDeploy: false
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.10"
+      - key: MRP_HOSTED
+        value: "1"
+      - key: MRP_USER
+        value: admin
+      - key: MRP_PASSWORD
+        generateValue: true   # Render creates one; read it in the dashboard

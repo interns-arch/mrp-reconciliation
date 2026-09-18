@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+sample_data/inventory_big.csv
+sample_data/mrp_big_bosch.csv
+sample_data/stock_big.csv
+sample_data/bad_inventory.csv
+sample_data/notes.pdf
+.venv/

@@ -1,0 +1,16 @@
+part_no,brand,part_name,mrp
+0986AB1234,BOSCH,Brake pad set front,2450.00
+0986AB1235,BOSCH,Brake pad set rear,2100.00
+0986AB1236,BOSCH,Oil filter,  340.50 
+0986ab1237,BOSCH,Air filter,510.00
+0986AB1238,BOSCH,Spark plug FR7,180.00
+0986AB1239,BOSCH,Wiper blade 22in,690.00
+0986AB1240,BOSCH,Horn disc 12V,1150.00
+DEN-55110,DENSO,Radiator assembly,8750.00
+DEN-55111,DENSO,Condenser,6400.00
+DEN-55112,DENSO,Blower motor,4300.00
+den-55113,DENSO,Cabin filter,450.00
+DEN-55114,DENSO,Compressor clutch,12500.00
+NGK-BKR6E,NGK,Spark plug BKR6E,210.00
+NGK-LKR7A,NGK,Spark plug LKR7A bulk,260.00
+,NGK,junk row with no part number,0

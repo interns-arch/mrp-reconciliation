@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>MRP Reconciliation</title>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <h1>MRP Reconciliation</h1>
+    <span class="offline-badge" title="This page loads only its own CSS/JS from localhost. No CDNs, no fonts, no telemetry.">100% offline &middot; localhost only</span>
+  </div>
+</header>
+
+<main>
+
+  <!-- ------------------------------------------------ step 0: inputs -->
+  <section class="card" id="card-inputs">
+    <h2><span class="step-num">1</span> Files</h2>
+
+    <div class="grid2">
+      <div class="slot" id="slot-inventory">
+        <h3>Inventory master <span class="req">required</span></h3>
+        <p class="hint">CSV with columns <code>part_no</code>, <code>brand</code>,
+          <code>part_name</code>, <code>mrp</code>. Large files are read in chunks.</p>
+        <input type="file" id="inventory-file" accept=".csv,.txt,.tsv,.xlsx,.xlsm,.xls">
+        <details class="pathbox">
+          <summary>or point at a file on disk</summary>
+          <div class="row">
+            <input type="text" id="inventory-path" placeholder="C:\data\inventory.csv">
+            <button type="button" class="btn small" id="inventory-path-go">Use path</button>
+          </div>
+        </details>
+        <div class="status" id="inventory-status"></div>
+      </div>
+
+      <div class="slot" id="slot-stock">
+        <h3>Warehouse stock <span class="opt">optional</span></h3>
+        <p class="hint">CSV with <code>part_no</code>, <code>available_quantity</code>,
+          <code>brand</code>. Leave empty and every part is treated as out of stock.</p>
+        <input type="file" id="stock-file" accept=".csv,.txt,.tsv,.xlsx,.xlsm,.xls">
+        <details class="pathbox">
+          <summary>or point at a file on disk</summary>
+          <div class="row">
+            <input type="text" id="stock-path" placeholder="C:\data\stock.csv">
+            <button type="button" class="btn small" id="stock-path-go">Use path</button>
+          </div>
+        </details>
+        <div class="status" id="stock-status"></div>
+      </div>
+    </div>
+
+    <div class="mrp-section">
+      <div class="row spread">
+        <h3>Brand MRP lists <span class="req">at least one</span></h3>
+        <button type="button" class="btn" id="add-mrp">+ Add MRP list</button>
+      </div>
+      <p class="hint">One supplier price sheet per brand. CSV or XLSX, any column
+        layout &mdash; you map the columns below after the file is read.</p>
+      <div id="mrp-list"></div>
+      <div class="empty-note" id="mrp-empty">No MRP lists added yet.</div>
+    </div>
+
+    <div class="row runrow">
+      <button type="button" class="btn primary big" id="run-btn" disabled>Run check</button>
+      <button type="button" class="btn ghost" id="reset-btn">Reset everything</button>
+      <span class="spinner hidden" id="run-spinner"></span>
+      <span class="run-note" id="run-note"></span>
+    </div>
+  </section>
+
+  <div id="banners"></div>
+
+  <!-- ------------------------------------------------ summary -->
+  <section class="card hidden" id="card-summary">
+    <h2><span class="step-num">2</span> Summary</h2>
+    <div id="summary-body"></div>
+  </section>
+
+  <!-- ------------------------------------------------ per-brand lists -->
+  <section class="card hidden" id="card-lists">
+    <h2><span class="step-num">3</span> Lists per brand</h2>
+    <p class="hint">Every part on the MRP lists you uploaded, split into one list each.
+      Pick a list, then download it.</p>
+    <div class="tabs" id="list-tabs"></div>
+    <p class="hint" id="list-blurb"></p>
+    <div class="tablewrap" data-step="lists">
+      <div class="controls">
+        <label>Brand <select data-role="brand"></select></label>
+        <label class="hidden">Issue type <select data-role="issue"></select></label>
+        <label>Search <input type="search" data-role="q" placeholder="part no / name"></label>
+        <label>Rows <select data-role="pagesize">
+          <option>25</option><option selected>50</option><option>100</option><option>250</option>
+        </select></label>
+        <span class="grow"></span>
+        <button type="button" class="btn small" data-role="download">Download CSV</button>
+        <button type="button" class="btn small ghost" data-role="download-filtered">Download filtered</button>
+      </div>
+      <div class="scroll"><table><thead></thead><tbody></tbody></table></div>
+      <div class="pager">
+        <button type="button" class="btn small" data-role="first">&laquo;</button>
+        <button type="button" class="btn small" data-role="prev">Prev</button>
+        <span data-role="pageinfo"></span>
+        <button type="button" class="btn small" data-role="next">Next</button>
+        <button type="button" class="btn small" data-role="last">&raquo;</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ------------------------------------------------ step 1 table -->
+  <section class="card hidden" id="card-step1">
+    <h2><span class="step-num">4</span> Step 1 &mdash; Inventory vs MRP list</h2>
+    <p class="hint">Every part that needs action, per brand. No stock filtering applied yet.
+      Parts the supplier prices at 0 or blank are not price issues and are left out - they
+      are all in the &ldquo;No MRP on list&rdquo; tab above.</p>
+    <div class="tablewrap" data-step="step1">
+      <div class="controls">
+        <label>Brand <select data-role="brand"></select></label>
+        <label>Issue type <select data-role="issue"></select></label>
+        <label>Search <input type="search" data-role="q" placeholder="part no / name"></label>
+        <label>Rows <select data-role="pagesize">
+          <option>25</option><option selected>50</option><option>100</option><option>250</option>
+        </select></label>
+        <span class="grow"></span>
+        <button type="button" class="btn small" data-role="download">Download CSV</button>
+        <button type="button" class="btn small ghost" data-role="download-filtered">Download filtered</button>
+      </div>
+      <div class="scroll"><table><thead></thead><tbody></tbody></table></div>
+      <div class="pager">
+        <button type="button" class="btn small" data-role="first">&laquo;</button>
+        <button type="button" class="btn small" data-role="prev">Prev</button>
+        <span data-role="pageinfo"></span>
+        <button type="button" class="btn small" data-role="next">Next</button>
+        <button type="button" class="btn small" data-role="last">&raquo;</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ------------------------------------------------ step 2 table -->
+  <section class="card hidden" id="card-step2">
+    <h2><span class="step-num">5</span> Step 2 &mdash; Final issues after stock check</h2>
+    <p class="hint">Only <code>MRP_MISMATCH</code> rows are filtered against stock. A hike on a
+      part with no physical stock is dropped; everything else is kept.</p>
+    <div class="tablewrap" data-step="step2">
+      <div class="controls">
+        <label>Brand <select data-role="brand"></select></label>
+        <label>Issue type <select data-role="issue"></select></label>
+        <label>Search <input type="search" data-role="q" placeholder="part no / name"></label>
+        <label>Rows <select data-role="pagesize">
+          <option>25</option><option selected>50</option><option>100</option><option>250</option>
+        </select></label>
+        <span class="grow"></span>
+        <button type="button" class="btn small" data-role="download">Download CSV</button>
+        <button type="button" class="btn small ghost" data-role="download-filtered">Download filtered</button>
+      </div>
+      <div class="scroll"><table><thead></thead><tbody></tbody></table></div>
+      <div class="pager">
+        <button type="button" class="btn small" data-role="first">&laquo;</button>
+        <button type="button" class="btn small" data-role="prev">Prev</button>
+        <span data-role="pageinfo"></span>
+        <button type="button" class="btn small" data-role="next">Next</button>
+        <button type="button" class="btn small" data-role="last">&raquo;</button>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<datalist id="brand-options"></datalist>
+
+<!-- template for one MRP list block -->
+<template id="mrp-template">
+  <div class="mrp-item">
+    <div class="row spread">
+      <strong class="mrp-title">MRP list</strong>
+      <button type="button" class="btn small ghost remove">Remove</button>
+    </div>
+    <div class="row">
+      <input type="file" class="mrp-file" accept=".csv,.txt,.tsv,.xlsx,.xlsm,.xls">
+      <input type="text" class="mrp-path" placeholder="...or a path on disk">
+      <button type="button" class="btn small mrp-path-go">Use path</button>
+    </div>
+    <div class="status mrp-status"></div>
+    <div class="mapping hidden">
+      <label>Brand
+        <input type="text" class="map-brand" list="brand-options" placeholder="e.g. BOSCH">
+      </label>
+      <label class="sheet-label hidden">Sheet
+        <select class="map-sheet"></select>
+      </label>
+      <label>Header row
+        <select class="map-header"></select>
+      </label>
+      <label>Part number column
+        <select class="map-part"></select>
+      </label>
+      <label>Description column
+        <select class="map-desc"></select>
+      </label>
+      <label>MRP column
+        <select class="map-mrp"></select>
+      </label>
+      <div class="preview-wrap">
+        <div class="preview-title">First rows as mapped</div>
+        <div class="scroll small"><table class="preview"><thead></thead><tbody></tbody></table></div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
