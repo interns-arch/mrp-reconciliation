@@ -521,13 +521,17 @@ async function runCheck() {
       banner('warn', 'Brands in Inventory with no MRP list uploaded (not checked)',
         [data.skipped_brands.join(', ')]);
     }
+    // renderListTabs() already triggers the lists table's own load() as part of
+    // selecting the first tab - calling it again here raced with a user's own
+    // tab click and could leave the wrong tab's data on screen (fixed properly
+    // by the request-sequence guard in load(), but no need to fire it twice).
     renderListTabs(data);
     tables.step1.reset(data.brands, data.issue_types);
     tables.step2.reset(data.brands, data.issue_types);
     $('#card-lists').classList.remove('hidden');
     $('#card-step1').classList.remove('hidden');
     $('#card-step2').classList.remove('hidden');
-    await Promise.all([tables.lists.load(), tables.step1.load(), tables.step2.load()]);
+    await Promise.all([tables.step1.load(), tables.step2.load()]);
     $('#run-note').textContent = 'Done.';
   } catch (e) {
     banner('err', 'The check could not be completed', [e.message]);
@@ -659,6 +663,15 @@ function renderListTabs(data) {
 
 // ------------------------------------------------------------ result tables
 
+const DOWNLOAD_FILENAMES = {
+  step1: 'step1_inventory_vs_mrp_issues.csv',
+  step2: 'step2_final_issues_after_stock_check.csv',
+  same: 'list1_matched_same_mrp.csv',
+  changed: 'list2_mrp_changed_old_vs_new.csv',
+  new: 'list3_new_parts_not_in_inventory.csv',
+  zero: 'list4_mrp_list_shows_zero.csv',
+};
+
 const NUM_COLS = new Set(['mrp_inventory', 'mrp_official', 'available_quantity',
                           'mrp', 'mrp_old', 'mrp_new', 'mrp_difference', 'mrp_change_pct']);
 const PILL_COLS = new Set(['issue_type', 'mrp_direction', 'in_stock', 'stock_data_available']);
@@ -685,6 +698,12 @@ function makeTable(step) {
   };
   let page = 1, sort = '', dir = 'asc', pages = 1, columns = [];
 
+  // Guards against a slow, older request (e.g. the tab you were on before
+  // you clicked a new one) overwriting the table with stale or empty data
+  // after a newer request has already come back. Only the response from the
+  // MOST RECENT call to load() is ever allowed to render.
+  let requestSeq = 0;
+
   function params() {
     const p = new URLSearchParams({
       page: String(page), page_size: ui.pagesize.value,
@@ -698,7 +717,16 @@ function makeTable(step) {
 
   async function load() {
     if (!state.runId) return;
-    const data = await getJSON(`/api/results/${state.runId}/${stepKey}?${params()}`);
+    const mySeq = ++requestSeq;
+    const stepAtRequestTime = stepKey;
+    let data;
+    try {
+      data = await getJSON(`/api/results/${state.runId}/${stepAtRequestTime}?${params()}`);
+    } catch (e) {
+      if (mySeq !== requestSeq) return;   // superseded even before the error - ignore it
+      throw e;
+    }
+    if (mySeq !== requestSeq) return;     // a newer load() has since started - drop this one
     columns = data.columns;
     pages = data.pages;
     page = data.page;
@@ -770,7 +798,12 @@ function makeTable(step) {
     }
     // A temporary <a download> rather than location.assign, so a browser that
     // decides to render the CSV instead of saving it can't navigate the app away.
-    const a = el('a', { href: `/api/download/${state.runId}/${stepKey}?${p}`, download: '' });
+    // The filename is set explicitly here (not left blank) so the browser always
+    // saves a real .csv file even if a proxy in front of a hosted deployment
+    // strips or rewrites the server's Content-Disposition header.
+    const base = DOWNLOAD_FILENAMES[stepKey] || `${stepKey}.csv`;
+    const filename = filtered ? base.replace(/\.csv$/, '_filtered.csv') : base;
+    const a = el('a', { href: `/api/download/${state.runId}/${stepKey}?${p}`, download: filename });
     a.style.display = 'none';
     document.body.append(a);
     a.click();

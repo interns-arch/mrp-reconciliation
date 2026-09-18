@@ -591,6 +591,22 @@ def main():
         check(f"{f} exists and covers the essentials",
               bool(body_txt) and all(m in body_txt for m in must), f"missing: {f}")
 
+    # ------------------------------------------------ frontend: tab race / downloads
+    print()
+    print("Frontend: tab-switch race guard and explicit download filenames")
+    check("load() is guarded against a stale, out-of-order response overwriting a newer tab",
+          "requestSeq" in appjs and "mySeq !== requestSeq" in appjs)
+    check("the redundant duplicate load of the lists table on run completion is gone",
+          appjs.count("tables.lists.load()") == 1,
+          f"found {appjs.count('tables.lists.load()')} calls - expected exactly 1 (inside renderListTabs)")
+    check("every result set has an explicit client-side download filename",
+          all(name in appjs for name in [
+              "step1_inventory_vs_mrp_issues.csv", "step2_final_issues_after_stock_check.csv",
+              "list1_matched_same_mrp.csv", "list2_mrp_changed_old_vs_new.csv",
+              "list3_new_parts_not_in_inventory.csv", "list4_mrp_list_shows_zero.csv"]))
+    check("the download anchor's filename is not left blank",
+          "download: '' }" not in appjs and "download: filename" in appjs)
+
     # ------------------------------------------------ offline guarantees
     print("\nOffline guarantees")
     html = client.get("/").get_data(as_text=True)
