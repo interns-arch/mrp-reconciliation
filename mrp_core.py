@@ -23,6 +23,21 @@ import pandas as pd
 INVENTORY_REQUIRED = ["part_no", "brand", "part_name", "mrp"]
 STOCK_REQUIRED = ["part_no", "available_quantity"]
 
+# Real exports spell these columns differently often enough that treating any
+# one spelling as "the" required name would reject perfectly good files. Each
+# key's canonical form (see _canon_header) is tried first; these fall back.
+COLUMN_SYNONYMS = {
+    "part_no": ["partno", "partnumber", "partcode", "itemcode", "sku",
+                "materialcode", "material", "code"],
+    "brand": ["make", "maker", "manufacturer", "supplier", "vendor"],
+    "part_name": ["partname", "description", "itemname", "productname",
+                  "itemdescription", "name"],
+    "mrp": ["price", "listprice", "mrprs", "rate", "unitprice"],
+    "available_quantity": ["quantity", "qty", "availableqty", "availqty",
+                           "stockqty", "stockquantity", "onhandqty", "onhand",
+                           "closingstock", "closingqty", "instock", "stock"],
+}
+
 ISSUE_MRP_MISMATCH = "MRP_MISMATCH"
 ISSUE_MRP_ZERO = "MRP_LIST_SHOWS_ZERO"
 ISSUE_MISSING_IN_MRP = "MISSING_IN_MRP_LIST"
@@ -184,19 +199,44 @@ def _canon_header(name: Any) -> str:
     return re.sub(r"[^a-z0-9]", "", str(name).strip().lower())
 
 
-def resolve_columns(available: list, wanted: list, where: str) -> dict:
-    """Map required logical names to the file's real headers, case-insensitively."""
+def resolve_columns(available: list, wanted: list, where: str,
+                    substitutions: list | None = None) -> dict:
+    """Map required logical names to the file's real headers.
+
+    Tries each wanted name's own spelling first (case/punctuation-insensitive),
+    then falls back to COLUMN_SYNONYMS - so a stock export that calls the
+    quantity column "Quantity" instead of "available_quantity" is accepted
+    rather than rejected. Every fallback used is appended to `substitutions`
+    (when given) so the caller can tell the user which column stood in for
+    which required one.
+    """
     lookup = {}
     for col in available:
         lookup.setdefault(_canon_header(col), col)
-    mapping = {}
-    missing = []
+
+    mapping: dict[str, str] = {}
     for want in wanted:
         real = lookup.get(_canon_header(want))
-        if real is None:
-            missing.append(want)
-        else:
+        if real is not None:
             mapping[want] = real
+
+    used = set(mapping.values())
+    for want in wanted:
+        if want in mapping:
+            continue
+        for alt in COLUMN_SYNONYMS.get(want, []):
+            real = lookup.get(alt)
+            if real is not None and real not in used:
+                mapping[want] = real
+                used.add(real)
+                if substitutions is not None:
+                    substitutions.append(
+                        f"{where}: used column '{real}' as '{want}' "
+                        f"(no column literally named '{want}' was found)."
+                    )
+                break
+
+    missing = [w for w in wanted if w not in mapping]
     if missing:
         raise UserError(
             f"{where} is missing required column(s): {', '.join(missing)}. "
@@ -423,10 +463,12 @@ class LoadResult:
 def load_inventory(path: str, chunksize: int = 100_000) -> LoadResult:
     """Read the inventory master in chunks so a 50MB+ file never blows up memory."""
     name = os.path.basename(path)
+    warnings: list = []
     if is_excel(path):
         raw = pd.read_excel(path, dtype=str)
         cols = list(raw.columns)
-        mapping = resolve_columns(cols, INVENTORY_REQUIRED, f"Inventory file '{name}'")
+        mapping = resolve_columns(cols, INVENTORY_REQUIRED, f"Inventory file '{name}'",
+                                  substitutions=warnings)
         chunks = [raw]
     else:
         opts = csv_opts(path)
@@ -437,7 +479,8 @@ def load_inventory(path: str, chunksize: int = 100_000) -> LoadResult:
         except Exception as exc:
             raise UserError(f"Could not read inventory file '{name}': {exc}") from exc
         cols = list(header.columns)
-        mapping = resolve_columns(cols, INVENTORY_REQUIRED, f"Inventory file '{name}'")
+        mapping = resolve_columns(cols, INVENTORY_REQUIRED, f"Inventory file '{name}'",
+                                  substitutions=warnings)
         usecols = list({mapping[c] for c in INVENTORY_REQUIRED})
         chunks = pd.read_csv(path, usecols=usecols, dtype=str, keep_default_na=False,
                              chunksize=chunksize, on_bad_lines="skip", **opts)
@@ -468,7 +511,6 @@ def load_inventory(path: str, chunksize: int = 100_000) -> LoadResult:
                            ["part_key", "part_no", "brand_key", "brand", "part_name"]})
         df["mrp_inventory"] = pd.Series(dtype="float64")
 
-    warnings = []
     blank_parts = rows_read - len(df)
     if blank_parts > 0:
         warnings.append(f"Inventory: skipped {blank_parts:,} row(s) with no usable part number.")
@@ -645,10 +687,11 @@ def load_stock(path, chunksize: int = 200_000) -> LoadResult:
     except Exception as exc:
         raise UserError(f"Could not read stock file '{name}': {exc}") from exc
 
-    mapping = resolve_columns(cols, STOCK_REQUIRED, f"Stock file '{name}'")
+    warnings: list = []
+    mapping = resolve_columns(cols, STOCK_REQUIRED, f"Stock file '{name}'",
+                              substitutions=warnings)
     brand_real = next((c for c in cols if _canon_header(c) == "brand"), None)
 
-    warnings = []
     if brand_real is None:
         warnings.append(
             f"Stock file '{name}' has no 'brand' column - stock is matched on part number "

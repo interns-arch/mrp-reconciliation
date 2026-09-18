@@ -228,11 +228,37 @@ def main():
     print("\nError handling")
     bad = os.path.join(SD, "bad_inventory.csv")
     with open(bad, "w", encoding="utf-8") as fh:
-        fh.write("code,maker,title\nX1,BOSCH,Thing\n")
+        fh.write("colA,colB,colC\nX1,BOSCH,Thing\n")
     r = client.post("/api/inventory", data={"path": bad}).get_json()
     check("missing required columns produces a clear message",
           not r["ok"] and "missing required column" in r["error"]
           and "part_no" in r["error"] and "mrp" in r["error"], str(r))
+
+    # ------------------------------------------------ column-name synonyms
+    print()
+    print("Column-name synonyms (stock/inventory exports rarely use the exact name)")
+    syn_stock = os.path.join(SD, "stock_synonym.csv")
+    with open(syn_stock, "w", encoding="utf-8") as fh:
+        fh.write("part_no,part_name,quantity,mrp,brand,warehouse_name\n"
+                 "P1,Widget,15,100,BOSCH,BIJWASAN\nP1,Widget,5,100,BOSCH,ANOTHER\n")
+    r = client.post("/api/stock", data={"path": syn_stock}).get_json()
+    check("a stock file using 'quantity' instead of 'available_quantity' is accepted",
+          r["ok"] and r["available"], str(r))
+    check("quantities from the synonym column are still summed correctly (15+5)",
+          r["unique_parts"] == 1, str(r))
+    check("using a synonym column is reported as a warning, not left silent",
+          any("used column 'quantity' as 'available_quantity'" in w for w in r["warnings"]),
+          str(r["warnings"]))
+
+    syn_inv = os.path.join(SD, "inventory_synonym.csv")
+    with open(syn_inv, "w", encoding="utf-8") as fh:
+        fh.write("code,maker,description,price\nX1,BOSCH,Thing,99.00\n")
+    r = client.post("/api/inventory", data={"path": syn_inv}).get_json()
+    check("an inventory file with no exact column names, only synonyms, is still accepted",
+          r["ok"], str(r))
+    check("all four inventory columns resolved via synonym are reported",
+          len(r["warnings"]) >= 4, str(r["warnings"]))
+
     r = client.post("/api/inventory", data={"path": os.path.join(SD, "nope.csv")}).get_json()
     check("missing file produces a clear message", not r["ok"] and "No file found" in r["error"])
     weird = os.path.join(SD, "notes.pdf")
