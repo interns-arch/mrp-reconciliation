@@ -92,14 +92,20 @@ ALLOW_LOCAL_PATHS = _env_flag("MRP_ALLOW_LOCAL_PATHS", not IS_HOSTED)
 AUTH_USER = os.environ.get("MRP_USER", "admin")
 AUTH_PASSWORD = os.environ.get("MRP_PASSWORD", "")
 
+# An explicit, separate opt-out. This exists so "no password" on a public URL
+# is always something someone chose on purpose, in one place they had to type
+# out, rather than something that happens by leaving MRP_PASSWORD blank.
+REQUIRE_AUTH = _env_flag("MRP_REQUIRE_AUTH", True)
+
 # Checked at import, not in main(): a hosted deployment starts the app through
 # gunicorn, which never calls main(), so a check there would never run.
-if IS_HOSTED and not AUTH_PASSWORD:
+if IS_HOSTED and REQUIRE_AUTH and not AUTH_PASSWORD:
     raise RuntimeError(
         "MRP Reconciliation refuses to start: MRP_HOSTED is set but MRP_PASSWORD is "
         "empty. Without a password this URL would expose your inventory and supplier "
-        "price lists to anyone who finds it. Set MRP_PASSWORD (and optionally MRP_USER) "
-        "in the service's environment variables and deploy again."
+        "price lists to anyone who finds it. Set MRP_PASSWORD (and optionally MRP_USER), "
+        "or set MRP_REQUIRE_AUTH=0 to run with no login at all (not recommended for a "
+        "public URL), then deploy again."
     )
 
 app = Flask(__name__, static_folder="static", static_url_path="/static")
