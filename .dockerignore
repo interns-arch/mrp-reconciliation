@@ -1,0 +1,13 @@
+.git
+.gitignore
+.gitattributes
+__pycache__
+*.pyc
+sample_data
+self_test.py
+make_sample_data.py
+render.yaml
+DEPLOY.md
+README.md
+run.bat
+.python-version
