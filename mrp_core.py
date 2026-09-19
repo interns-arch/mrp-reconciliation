@@ -42,15 +42,23 @@ ISSUE_MRP_MISMATCH = "MRP_MISMATCH"
 ISSUE_MRP_ZERO = "MRP_LIST_SHOWS_ZERO"
 ISSUE_MISSING_IN_MRP = "MISSING_IN_MRP_LIST"
 ISSUE_MISSING_IN_INV = "MISSING_IN_INVENTORY"
+# A part on the supplier's list that Inventory does not have yet AND that has
+# no usable MRP either (0 or blank). There is no price to set the new part up
+# with, so - per the reconciliation workflow - it is dropped rather than
+# listed as a new part to create. Distinct from ISSUE_MISSING_IN_INV, which is
+# a new part WITH a real price.
+ISSUE_NEW_NO_MRP = "NEW_PART_NO_MRP"
 
-ISSUE_TYPES = [ISSUE_MRP_MISMATCH, ISSUE_MRP_ZERO, ISSUE_MISSING_IN_MRP, ISSUE_MISSING_IN_INV]
+ISSUE_TYPES = [ISSUE_MRP_MISMATCH, ISSUE_MRP_ZERO, ISSUE_MISSING_IN_MRP,
+              ISSUE_MISSING_IN_INV, ISSUE_NEW_NO_MRP]
 
 # What the Step 1 / Step 2 issue reports actually contain. A part whose official
-# MRP is 0 or blank is a bulk/non-retail pack with no printed MRP - it recurs on
-# every run and cannot be mispriced against an MRP it does not have, so it is
-# kept out of the issue reports and lives in its own list instead.
+# MRP is 0 or blank is a bulk/non-retail pack with no printed MRP (if it is
+# already in Inventory) or has nothing to act on at all (if it is new) - either
+# way it recurs on every run and is not something to re-price, so both are kept
+# out of the issue reports and live in their own per-brand lists instead.
 REPORTED_ISSUE_TYPES = [ISSUE_MRP_MISMATCH, ISSUE_MISSING_IN_MRP, ISSUE_MISSING_IN_INV]
-NOT_AN_ISSUE = (ISSUE_MRP_ZERO,)
+NOT_AN_ISSUE = (ISSUE_MRP_ZERO, ISSUE_NEW_NO_MRP)
 
 # Not an issue, so it never reaches the Step 1 report - but it is one of the
 # per-brand lists, so the classification keeps it.
@@ -60,31 +68,58 @@ MATCHED_SAME_MRP = "MATCHED_SAME_MRP"
 # in exactly one of these four files.
 LIST_SPECS = {
     "same": {
-        "file": "list1_matched_same_mrp.csv",
+        "file": "list1_same_mrp.csv",
         "label": "Same MRP",
-        "blurb": "On the MRP list and in Inventory with an identical MRP - nothing to do.",
-        "columns": ["brand", "part_no", "part_name", "mrp"],
+        "blurb": "On the MRP list and in Inventory with an identical MRP - no change required.",
+        "columns": ["brand", "part_no", "part_name", "mrp", "available_quantity"],
     },
-    "changed": {
-        "file": "list2_mrp_changed_old_vs_new.csv",
-        "label": "MRP changed",
-        "blurb": "In Inventory but the supplier's MRP differs - old and new price side by side.",
+    "increase": {
+        "file": "list2_mrp_increase.csv",
+        "label": "MRP Increase",
+        "blurb": "In Inventory, the supplier's MRP is higher - update the dealer portal "
+                 "directly, no confirmation needed. Old vs new price for the update.",
         "columns": ["brand", "part_no", "part_name", "mrp_old", "mrp_new",
-                    "mrp_direction", "mrp_difference", "mrp_change_pct"],
+                    "mrp_difference", "mrp_change_pct", "available_quantity"],
+    },
+    "decrease": {
+        "file": "list3_mrp_decrease.csv",
+        "label": "MRP Decrease",
+        "blurb": "In Inventory, the supplier's MRP is lower - review this list before "
+                 "applying the price cut. Old vs new price for comparison.",
+        "columns": ["brand", "part_no", "part_name", "mrp_old", "mrp_new",
+                    "mrp_difference", "mrp_change_pct", "available_quantity"],
     },
     "new": {
-        "file": "list3_new_parts_not_in_inventory.csv",
-        "label": "New parts",
-        "blurb": "On the MRP list but not set up in Inventory - these are new parts.",
-        "columns": ["brand", "part_no", "part_name", "mrp_new", "status"],
+        "file": "list4_new_parts.csv",
+        "label": "New Parts",
+        "blurb": "On the MRP list, not yet in Inventory, and the supplier gave a real "
+                 "price - description reformatted for the part master. Send this list for "
+                 "confirmation; once approved, upload it to the dealer portal.",
+        "columns": ["brand", "part_no", "part_name", "mrp_new", "available_quantity", "status"],
+    },
+    "ignored_new": {
+        "file": "list5_ignored_new_parts_no_mrp.csv",
+        "label": "New, no MRP",
+        "blurb": "On the MRP list, not in Inventory, but the supplier gave no usable price "
+                 "(0 or blank) - there is nothing to create the part master with, so these "
+                 "are ignored. Kept here only so nothing vanishes silently.",
+        "columns": ["brand", "part_no", "part_name", "note"],
     },
     "zero": {
-        "file": "list4_mrp_list_shows_zero.csv",
+        "file": "list6_existing_part_no_mrp.csv",
         "label": "No MRP on list",
-        "blurb": "In Inventory, but the MRP list carries 0 or a blank - typically a bulk "
-                 "or non-retail pack (drums, barrels) that has no printed MRP. Not a price "
-                 "issue, so these are kept out of Step 1 and Step 2 and listed only here.",
-        "columns": ["brand", "part_no", "part_name", "mrp_inventory", "note"],
+        "blurb": "Already in Inventory, but the MRP list carries 0 or a blank for it - "
+                 "typically a bulk or non-retail pack. No price to update to, so its "
+                 "current MRP is kept as it is.",
+        "columns": ["brand", "part_no", "part_name", "mrp_inventory", "available_quantity", "note"],
+    },
+    "not_on_list": {
+        "file": "list7_not_on_supplier_list.csv",
+        "label": "Not on list",
+        "blurb": "Already in Inventory, but this brand's uploaded MRP list does not "
+                 "mention this part at all - possibly discontinued. Its current MRP is "
+                 "kept as it is.",
+        "columns": ["brand", "part_no", "part_name", "mrp_inventory", "available_quantity", "note"],
     },
 }
 LIST_KEYS = list(LIST_SPECS)
@@ -255,6 +290,40 @@ def fmt_money(v) -> str:
     if math.isnan(f):
         return ""
     return f"{f:,.2f}"
+
+
+# Small words a title-cased part description keeps lowercase, same rule most
+# style guides use for headings ("Filter Element With O Ring" -> "... with ...").
+_TITLE_MINOR_WORDS = {"with", "and", "or", "of", "for", "the", "a", "an", "to", "in", "on"}
+
+
+def format_part_description(text: Any) -> str:
+    """Clean up a new part's description before it goes on the New Parts list.
+
+    Supplier descriptions arrive as free text - inconsistent case, doubled
+    spaces, stray punctuation. This is a generic tidy-up (collapse whitespace,
+    trim stray punctuation, title-case with small words kept lowercase) rather
+    than a specific company template, since none was given; if there is a
+    house format to match, this is the one function to change.
+    """
+    s = str(text or "").strip()
+    if not s or s.lower() in ("nan", "none"):
+        return ""
+    s = _WS.sub(" ", s)
+    s = s.strip(" -_,.;:")
+    words = s.split(" ")
+    out = []
+    for i, w in enumerate(words):
+        if not w:
+            continue
+        # Leave things like "12V", "O2", "SN/MA2" alone - only re-case a word
+        # that is purely alphabetic, so codes and mixed alphanumerics survive.
+        if w.isalpha() and (i == 0 or w.lower() not in _TITLE_MINOR_WORDS):
+            w = w[0].upper() + w[1:].lower()
+        elif w.isalpha():
+            w = w.lower()
+        out.append(w)
+    return " ".join(out)
 
 
 # ---------------------------------------------------------------------------
@@ -797,15 +866,28 @@ def run_step1(inventory: pd.DataFrame, mrp_lists: list):
         issue[left_only] = ISSUE_MISSING_IN_MRP
         note[left_only] = (
             "Part is in Inventory but not on the uploaded MRP list for this brand - "
-            "possibly discontinued by the supplier; verify before de-listing."
+            "keep its current MRP as it is; possibly discontinued by the supplier."
         )
-        issue[right_only] = ISSUE_MISSING_IN_INV
-        note[right_only] = (
+
+        # A literal 0 (or a blank cell) on the official list is never a usable
+        # price, whether the part is already in Inventory or brand new.
+        no_price = blank.to_numpy() | (off_mrp.fillna(-1.0).abs() < MRP_TOLERANCE).to_numpy()
+
+        new_no_mrp = right_only & no_price
+        issue[new_no_mrp] = ISSUE_NEW_NO_MRP
+        note[new_no_mrp] = (
+            "Part is on the new MRP list, not set up in Inventory, and the supplier gave "
+            "no usable MRP for it (0 or blank) - there is no price to create it with, so "
+            "it is ignored rather than listed as a new part."
+        )
+        issue[right_only & ~no_price] = ISSUE_MISSING_IN_INV
+        note[right_only & ~no_price] = (
             "Part is on the new MRP list but not set up in Inventory - create the part master."
         )
 
-        # A literal 0 (or a blank cell) on the official list is never a price cut.
-        zero = both & (blank.to_numpy() | (off_mrp.fillna(-1.0).abs() < MRP_TOLERANCE).to_numpy())
+        # Same "no usable price" rule for a part already in Inventory: never a
+        # price cut to zero, just nothing to update this MRP to.
+        zero = both & no_price
         issue[zero] = ISSUE_MRP_ZERO
         note[zero & blank.to_numpy()] = BLANK_NOTE
         note[zero & ~blank.to_numpy()] = ZERO_NOTE
@@ -899,64 +981,120 @@ def run_step1(inventory: pd.DataFrame, mrp_lists: list):
 
 
 # ---------------------------------------------------------------------------
-# Per-brand lists: same MRP / MRP changed / new part
+# Per-brand lists: same MRP / MRP increase / decrease / new part / etc.
 # ---------------------------------------------------------------------------
 
 def _empty_list(key: str) -> pd.DataFrame:
     return pd.DataFrame({c: pd.Series(dtype="object") for c in LIST_SPECS[key]["columns"]})
 
 
-def split_lists(classified: pd.DataFrame) -> dict:
-    """Split one run into the four per-brand lists.
+def lookup_quantity(df: pd.DataFrame, stock: pd.DataFrame, stock_available: bool,
+                    stock_has_brand: bool) -> pd.Series:
+    """Available quantity for each row of `df`, keyed by its `_brand_key`/`_part_key`.
 
-    Every usable row of every uploaded MRP list lands in exactly one of them,
-    so the four row counts always add up to the rows read off the lists.
-    Parts that are in Inventory but absent from the supplier's list are not
-    here at all - they are a Step 1 concern (MISSING_IN_MRP_LIST).
+    Shared by Step 2 and the per-brand lists so both look stock up exactly the
+    same way. Returns NaN throughout when there is no stock data.
+    """
+    if not stock_available or stock.empty:
+        return pd.Series(np.nan, index=df.index, dtype="float64")
+    if stock_has_brand:
+        qty_map = stock.set_index(["brand_key", "part_key"])["available_quantity"]
+        idx = pd.MultiIndex.from_arrays([df["_brand_key"].astype(object),
+                                         df["_part_key"].astype(object)])
+        return pd.Series(qty_map.reindex(idx).to_numpy(), index=df.index, dtype="float64")
+    by_part = stock.groupby("part_key", as_index=True)["available_quantity"].sum()
+    return pd.Series(by_part.reindex(df["_part_key"].astype(object)).to_numpy(),
+                     index=df.index, dtype="float64")
+
+
+def split_lists(classified: pd.DataFrame, stock: pd.DataFrame | None = None,
+                stock_available: bool = False, stock_has_brand: bool = False) -> dict:
+    """Split one run into the per-brand lists, one row landing in exactly one.
+
+    `stock` is informational here (an available_quantity column on most
+    lists), never a filter - a part is never dropped from these lists because
+    of its stock level. That is what Step 2 is for.
     """
     out = {k: _empty_list(k) for k in LIST_KEYS}
     if classified.empty:
         return out
+
+    if stock is None:
+        stock = _empty_stock()
+    qty_all = lookup_quantity(classified, stock, stock_available, stock_has_brand)
 
     def base(df):
         return {"brand": df["brand"].to_numpy(),
                 "part_no": df["part_no"].to_numpy(),
                 "part_name": df["part_name"].to_numpy()}
 
-    same = classified[classified["issue_type"] == MATCHED_SAME_MRP]
+    def qty_for(mask):
+        return qty_all[mask].to_numpy()
+
+    same_mask = classified["issue_type"] == MATCHED_SAME_MRP
+    same = classified[same_mask]
     if not same.empty:
-        out["same"] = pd.DataFrame({**base(same), "mrp": same["mrp_official"].to_numpy()})
+        out["same"] = pd.DataFrame({**base(same), "mrp": same["mrp_official"].to_numpy(),
+                                    "available_quantity": qty_for(same_mask)})
 
-    chg = classified[classified["issue_type"] == ISSUE_MRP_MISMATCH]
-    if not chg.empty:
-        old = pd.to_numeric(chg["mrp_inventory"], errors="coerce").fillna(0.0).to_numpy()
-        new = pd.to_numeric(chg["mrp_official"], errors="coerce").to_numpy()
-        with np.errstate(divide="ignore", invalid="ignore"):
-            pct = np.where(np.abs(old) > 0, (new - old) / np.where(np.abs(old) > 0, old, 1.0) * 100.0,
-                           np.nan)
-        out["changed"] = pd.DataFrame({
-            **base(chg),
-            "mrp_old": old,
-            "mrp_new": new,
-            "mrp_direction": chg["mrp_direction"].to_numpy(),
-            "mrp_difference": new - old,
-            "mrp_change_pct": pct,
-        })
+    mismatch_mask = classified["issue_type"] == ISSUE_MRP_MISMATCH
+    mismatch = classified[mismatch_mask]
+    if not mismatch.empty:
+        old_all = pd.to_numeric(mismatch["mrp_inventory"], errors="coerce").fillna(0.0)
+        new_all = pd.to_numeric(mismatch["mrp_official"], errors="coerce")
+        for key, direction in (("increase", "INCREASE"), ("decrease", "DECREASE")):
+            dmask = mismatch["mrp_direction"] == direction
+            if not dmask.any():
+                continue
+            old = old_all[dmask].to_numpy()
+            new = new_all[dmask].to_numpy()
+            with np.errstate(divide="ignore", invalid="ignore"):
+                pct = np.where(np.abs(old) > 0, (new - old) / np.where(np.abs(old) > 0, old, 1.0) * 100.0,
+                               np.nan)
+            out[key] = pd.DataFrame({
+                **base(mismatch[dmask]),
+                "mrp_old": old,
+                "mrp_new": new,
+                "mrp_difference": new - old,
+                "mrp_change_pct": pct,
+                "available_quantity": qty_for(mismatch_mask)[dmask.to_numpy()],
+            })
 
-    fresh = classified[classified["issue_type"] == ISSUE_MISSING_IN_INV]
+    fresh_mask = classified["issue_type"] == ISSUE_MISSING_IN_INV
+    fresh = classified[fresh_mask]
     if not fresh.empty:
         out["new"] = pd.DataFrame({
             **base(fresh),
+            "part_name": [format_part_description(n) or n
+                         for n in fresh["part_name"].to_numpy()],
             "mrp_new": fresh["mrp_official"].to_numpy(),
-            "status": "NEW PART - not present in Inventory, needs a part master",
+            "available_quantity": qty_for(fresh_mask),
+            "status": "NEW PART - send for confirmation, then upload to the dealer portal.",
         })
 
-    zero = classified[classified["issue_type"] == ISSUE_MRP_ZERO]
+    ignored_mask = classified["issue_type"] == ISSUE_NEW_NO_MRP
+    ignored = classified[ignored_mask]
+    if not ignored.empty:
+        out["ignored_new"] = pd.DataFrame({**base(ignored), "note": ignored["note"].to_numpy()})
+
+    zero_mask = classified["issue_type"] == ISSUE_MRP_ZERO
+    zero = classified[zero_mask]
     if not zero.empty:
         out["zero"] = pd.DataFrame({
             **base(zero),
             "mrp_inventory": zero["mrp_inventory"].to_numpy(),
+            "available_quantity": qty_for(zero_mask),
             "note": zero["note"].to_numpy(),
+        })
+
+    notlist_mask = classified["issue_type"] == ISSUE_MISSING_IN_MRP
+    notlist = classified[notlist_mask]
+    if not notlist.empty:
+        out["not_on_list"] = pd.DataFrame({
+            **base(notlist),
+            "mrp_inventory": notlist["mrp_inventory"].to_numpy(),
+            "available_quantity": qty_for(notlist_mask),
+            "note": notlist["note"].to_numpy(),
         })
 
     return out
@@ -973,19 +1111,7 @@ def run_step2(step1: pd.DataFrame, stock: pd.DataFrame, stock_available: bool,
         out = pd.DataFrame({c: pd.Series(dtype="object") for c in STEP2_COLUMNS})
         return out, {"dropped": 0, "kept": 0}
 
-    if stock_available and not stock.empty:
-        if stock_has_brand:
-            qty_map = stock.set_index(["brand_key", "part_key"])["available_quantity"]
-            idx = pd.MultiIndex.from_arrays([df["_brand_key"].astype(object),
-                                             df["_part_key"].astype(object)])
-            qty = pd.Series(qty_map.reindex(idx).to_numpy(), index=df.index, dtype="float64")
-        else:
-            by_part = stock.groupby("part_key", as_index=True)["available_quantity"].sum()
-            qty = pd.Series(by_part.reindex(df["_part_key"].astype(object)).to_numpy(),
-                            index=df.index, dtype="float64")
-    else:
-        qty = pd.Series(np.nan, index=df.index, dtype="float64")
-
+    qty = lookup_quantity(df, stock, stock_available, stock_has_brand)
     df["available_quantity"] = qty
     in_stock = (qty.fillna(0.0) > 0) & bool(stock_available)
     df["in_stock"] = np.where(in_stock, "YES", "NO")

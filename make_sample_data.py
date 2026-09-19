@@ -65,6 +65,7 @@ def small_sample():
         ["0986AB1238", "SPARK PLUG FR7", "180.00"],
         ["0986AB1239", "WIPER BLADE 22IN", "0"],
         ["0986AB1241", "FUEL PUMP MODULE", "7850.00"],   # not in inventory
+        ["0986AB1299", "SEALANT DRUM BULK", "0"],        # new part, no usable MRP -> ignored
         ["0986AB1236", "OIL FILTER (DUPLICATE ROW)", "305.00"],  # duplicate -> dropped
         ["", "", ""],
         ["0", "0", "0"],

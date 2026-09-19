@@ -43,7 +43,7 @@ large inventory plus a matching MRP list and stock export.
 python self_test.py
 ```
 
-85 assertions covering every rule below, driven through the real HTTP endpoints.
+151 assertions covering every rule below, driven through the real HTTP endpoints.
 
 ---
 
@@ -101,38 +101,65 @@ Two kinds of part produce no row in Step 1:
   bulk and non-retail packs — 210 L drums, 180 kg barrels — which have no printed
   MRP at all. They cannot be mispriced against an MRP they do not have, and they
   recur unchanged on every run, so they are kept out of the issue reports. Every
-  one of them is in the **No MRP on list** tab and `list4_...csv`, and the summary
-  states how many were set aside. They are never reported as a price cut to zero.
+  one of them is in the **No MRP on list** tab (`list6_existing_part_no_mrp.csv`),
+  and the summary states how many were set aside. They are never reported as a
+  price cut to zero.
 
 Output: **`step1_inventory_vs_mrp_issues.csv`** —
 `brand, part_no, part_name, issue_type, mrp_inventory, mrp_official, mrp_direction, note`
 
-### The same run, split into per-brand lists
+### The same run, split into per-brand lists (the reconciliation workflow)
 
-The **Lists per brand** section answers "what's on this supplier's list?" directly.
-Every usable row of every uploaded MRP list lands in exactly one of four files,
-so the four counts always add up to the rows read off the lists. None of them is
-stock-filtered — they are the raw comparison.
+The **Lists per brand** section mirrors the actual reconciliation workflow —
+each list is a specific action, not just an issue type. Every part touched by
+a run lands in exactly one of these seven lists.
 
-| List | File | Columns |
-|---|---|---|
-| **Same MRP** | `list1_matched_same_mrp.csv` | `brand, part_no, part_name, mrp` |
-| **MRP changed** | `list2_mrp_changed_old_vs_new.csv` | `brand, part_no, part_name, mrp_old, mrp_new, mrp_direction, mrp_difference, mrp_change_pct` |
-| **New parts** | `list3_new_parts_not_in_inventory.csv` | `brand, part_no, part_name, mrp_new, status` |
-| **No MRP on list** | `list4_mrp_list_shows_zero.csv` | `brand, part_no, part_name, mrp_inventory, note` |
+| List | File | Action | Columns |
+|---|---|---|---|
+| **Same MRP** | `list1_same_mrp.csv` | No change required. | `brand, part_no, part_name, mrp, available_quantity` |
+| **MRP Increase** | `list2_mrp_increase.csv` | Update the dealer portal directly — no confirmation needed. | `brand, part_no, part_name, mrp_old, mrp_new, mrp_difference, mrp_change_pct, available_quantity` |
+| **MRP Decrease** | `list3_mrp_decrease.csv` | Review before applying the cut. | same columns as Increase |
+| **New Parts** | `list4_new_parts.csv` | Description reformatted; send for confirmation, then upload to the dealer portal. | `brand, part_no, part_name, mrp_new, available_quantity, status` |
+| **New, no MRP** | `list5_ignored_new_parts_no_mrp.csv` | Ignored — no price to create the part with. | `brand, part_no, part_name, note` |
+| **No MRP on list** | `list6_existing_part_no_mrp.csv` | Keep the current MRP as it is. | `brand, part_no, part_name, mrp_inventory, available_quantity, note` |
+| **Not on list** | `list7_not_on_supplier_list.csv` | Keep the current MRP as it is. | `brand, part_no, part_name, mrp_inventory, available_quantity, note` |
 
 `mrp_old` is the Inventory price, `mrp_new` the supplier's; `mrp_difference` and
-`mrp_change_pct` are signed, so a cut reads `-41.50 / -12.2%`.
+`mrp_change_pct` are signed, so a cut reads `-41.50 / -12.2%`. `available_quantity`
+comes from the Stock file wherever one was uploaded — it is shown for reference
+on every list, never used to filter or drop a row here (that is what Step 2 is
+for).
 
-The fourth list exists because a part whose official MRP is `0` or blank is
-neither "same" nor "changed" — putting it in the changed list would corrupt a
-re-pricing worklist, and dropping it would make parts vanish. It is kept
-separate so nothing on the supplier's list goes unaccounted for.
+A few rules worth knowing:
 
-Parts that are in Inventory but **absent** from the supplier's list are not in
-these four; they are a Step 1 concern (`MISSING_IN_MRP_LIST`).
+- **A new part with no usable MRP (0 or blank) is ignored, not listed as a new
+  part** — there is no price to set up a part master with. It still shows up in
+  its own **New, no MRP** list so nothing vanishes silently; it simply never
+  reaches the New Parts list you'd send for confirmation.
+- **New Parts descriptions are reformatted** (`mrp_core.format_part_description`):
+  whitespace collapsed, stray punctuation trimmed, title-cased with small words
+  (`with`, `and`, `of`, …) kept lowercase — e.g. `"FILTER ELEMENT WITH O RING"`
+  becomes `"Filter Element with O Ring"`. No specific company template was given,
+  so this is a generic clean-up; if there's a house format to match, this is the
+  one function to change. Only the New Parts list is reformatted — every other
+  list keeps the source text as-is.
+- **"No MRP on list" and "Not on list" both mean "keep the MRP as it is"** — the
+  first is a part that's on the supplier's sheet with a blank/zero price
+  (usually a bulk or non-retail pack), the second is a part the sheet doesn't
+  mention at all (possibly discontinued). They're kept as two separate lists
+  rather than merged, since the two situations call for different verification
+  even though neither results in a price change.
+- **MRP Increase and Decrease are never stock-filtered.** They are the full,
+  raw comparison — every price change, regardless of stock level. That is a
+  deliberate difference from the older Step 1/Step 2 reports below, which do
+  filter by stock; see that section for why the two serve different purposes.
 
 ## Step 2 — filter against Stock
+
+*(Step 1 and Step 2 are the original, detailed issue-tracking reports; the
+seven-list workflow above is the newer, action-oriented view of the same data.
+Both run on every check and stay independent — nothing here changes what the
+lists above contain, or vice versa.)*
 
 Only `MRP_MISMATCH` rows are filtered. Every other issue type passes through
 unchanged, with `decision_reason` saying so — they have no old/new MRP pair to

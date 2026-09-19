@@ -556,7 +556,8 @@ def api_run():
         bool(stock_res.stats.get("has_brand")),
     )
 
-    lists = core.split_lists(classified)
+    lists = core.split_lists(classified, stock_res.df, stock_available,
+                             bool(stock_res.stats.get("has_brand")))
 
     # Loud alarm for the classic mistake: the right brand name on the wrong
     # file, or the wrong part-number column - the whole list then reads as new.

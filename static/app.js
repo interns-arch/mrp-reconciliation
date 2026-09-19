@@ -666,10 +666,13 @@ function renderListTabs(data) {
 const DOWNLOAD_FILENAMES = {
   step1: 'step1_inventory_vs_mrp_issues.csv',
   step2: 'step2_final_issues_after_stock_check.csv',
-  same: 'list1_matched_same_mrp.csv',
-  changed: 'list2_mrp_changed_old_vs_new.csv',
-  new: 'list3_new_parts_not_in_inventory.csv',
-  zero: 'list4_mrp_list_shows_zero.csv',
+  same: 'list1_same_mrp.csv',
+  increase: 'list2_mrp_increase.csv',
+  decrease: 'list3_mrp_decrease.csv',
+  new: 'list4_new_parts.csv',
+  ignored_new: 'list5_ignored_new_parts_no_mrp.csv',
+  zero: 'list6_existing_part_no_mrp.csv',
+  not_on_list: 'list7_not_on_supplier_list.csv',
 };
 
 const NUM_COLS = new Set(['mrp_inventory', 'mrp_official', 'available_quantity',

@@ -196,10 +196,14 @@ def main():
     check("the run reports how many parts were set aside for having no MRP",
           body["no_mrp_on_list"] == len(zero_csv) and body["no_mrp_on_list"] > 0,
           str(body.get("no_mrp_on_list")))
-    check("the four lists still account for every usable MRP-list row",
-          body["lists"]["same"]["total"] + body["lists"]["changed"]["total"]
-          + body["lists"]["new"]["total"] + body["lists"]["zero"]["total"]
-          == sum(f["usable_rows"] for f in body["mrp_files"]))
+    # not_on_list is inventory rows with no MRP-list counterpart at all, so it
+    # is not part of this invariant - the other six lists are, each built from
+    # a supplier-list row that was matched (or not) against Inventory.
+    mrp_side_keys = [k for k in core.LIST_KEYS if k != "not_on_list"]
+    check("the six MRP-list-side lists account for every usable MRP-list row",
+          sum(body["lists"][k]["total"] for k in mrp_side_keys)
+          == sum(f["usable_rows"] for f in body["mrp_files"]),
+          str({k: body["lists"][k]["total"] for k in mrp_side_keys}))
 
     # ------------------------------------------------ no stock file at all
     print("\nRun with NO stock file")
@@ -295,7 +299,7 @@ def main():
 
     # ------------------------------------------------ per-brand lists
     print()
-    print("Per-brand lists: same MRP / MRP changed / new parts")
+    print("Per-brand lists: same / increase / decrease / new / ignored / zero / not-on-list")
     lb, _, _, _ = run(client, specs, os.path.join(SD, "stock.csv"))
     rid2 = lb["run_id"]
 
@@ -305,60 +309,86 @@ def main():
     same = list_csv("same")
     check("same-MRP list has the identical-price parts only",
           set(same["part_no"]) == {"0986AB1238", "DEN-55111"}, str(set(same["part_no"])))
-    check("same-MRP list columns", list(same.columns) == ["brand", "part_no", "part_name", "mrp"],
+    check("same-MRP list columns",
+          list(same.columns) == ["brand", "part_no", "part_name", "mrp", "available_quantity"],
           str(list(same.columns)))
     check("same-MRP list carries the agreed price",
           get(same, "0986AB1238")["mrp"] == "180.00", val(get(same, "0986AB1238"), "mrp"))
 
-    changed = list_csv("changed")
-    check("changed list columns include old and new MRP",
-          list(changed.columns) == ["brand", "part_no", "part_name", "mrp_old", "mrp_new",
-                                    "mrp_direction", "mrp_difference", "mrp_change_pct"],
-          str(list(changed.columns)))
-    r = get(changed, "0986AB1234")
-    check("changed row shows old 2450.00 -> new 2695.00",
-          r is not None and r["mrp_old"] == "2450.00" and r["mrp_new"] == "2695.00",
-          val(r, "mrp_old") + " -> " + val(r, "mrp_new"))
-    check("changed row records direction and signed difference",
-          r is not None and r["mrp_direction"] == "INCREASE" and r["mrp_difference"] == "245.00",
-          val(r, "mrp_difference"))
-    r = get(changed, "0986AB1236")
-    check("a price cut is a negative difference",
-          r is not None and r["mrp_direction"] == "DECREASE"
-          and r["mrp_difference"] == "-41.50", val(r, "mrp_difference"))
-    check("changed list is NOT stock-filtered (the dropped hike is still here)",
-          get(changed, "0986AB1235") is not None)
+    increase = list_csv("increase")
+    decrease = list_csv("decrease")
+    check("increase list columns include old and new MRP, no redundant direction column",
+          list(increase.columns) == ["brand", "part_no", "part_name", "mrp_old", "mrp_new",
+                                     "mrp_difference", "mrp_change_pct", "available_quantity"],
+          str(list(increase.columns)))
+    check("increase list holds only price hikes",
+          set(increase["part_no"]) == {"0986AB1234", "0986AB1235", "DEN-55110"},
+          str(set(increase["part_no"])))
+    check("decrease list holds only price cuts",
+          set(decrease["part_no"]) == {"0986AB1236", "0986ab1237", "DEN-55112"},
+          str(set(decrease["part_no"])))
+    r = get(increase, "0986AB1234")
+    check("increase row shows old 2450.00 -> new 2695.00, signed difference",
+          r is not None and r["mrp_old"] == "2450.00" and r["mrp_new"] == "2695.00"
+          and r["mrp_difference"] == "245.00", val(r, "mrp_difference"))
+    r = get(decrease, "0986AB1236")
+    check("decrease row records a negative difference",
+          r is not None and r["mrp_difference"] == "-41.50", val(r, "mrp_difference"))
+    check("increase list is NOT stock-filtered (the Step-2-dropped hike is still here)",
+          get(increase, "0986AB1235") is not None)
 
     fresh = list_csv("new")
-    check("new-parts list holds only parts absent from Inventory",
+    check("new-parts list holds only parts absent from Inventory WITH a real price",
           set(fresh["part_no"]) == {"0986AB1241", "DEN-55115", "DEN-55116"},
           str(set(fresh["part_no"])))
-    check("new-parts list says they are new",
-          all("NEW PART" in s for s in fresh["status"]), str(set(fresh["status"])))
-    check("new-parts list carries the supplier description and price",
-          get(fresh, "0986AB1241")["part_name"] == "FUEL PUMP MODULE"
-          and get(fresh, "0986AB1241")["mrp_new"] == "7850.00")
+    check("the new part with MRP=0 is NOT in the new-parts list",
+          "0986AB1299" not in set(fresh["part_no"]), str(set(fresh["part_no"])))
+    check("new-parts list says they need confirmation before upload",
+          all("confirmation" in s and "dealer portal" in s for s in fresh["status"]),
+          str(set(fresh["status"])))
+    check("new-parts description is reformatted (title case), not the raw supplier text",
+          get(fresh, "0986AB1241")["part_name"] == "Fuel Pump Module",
+          val(get(fresh, "0986AB1241"), "part_name"))
+    check("new-parts list still carries the price", get(fresh, "0986AB1241")["mrp_new"] == "7850.00")
+
+    ignored = list_csv("ignored_new")
+    check("the no-MRP new part lands in its own ignored list instead of vanishing",
+          set(ignored["part_no"]) == {"0986AB1299"}, str(set(ignored["part_no"])))
+    check("the ignored list explains why", "no usable MRP" in get(ignored, "0986AB1299")["note"])
 
     zero = list_csv("zero")
-    check("zero/blank MRP parts kept out of same and changed",
+    check("zero/blank MRP parts (already in Inventory) kept out of same/increase/decrease",
           set(zero["part_no"]) == {"0986AB1239", "den-55113"}, str(set(zero["part_no"])))
 
-    total = len(same) + len(changed) + len(fresh) + len(zero)
+    notlist = list_csv("not_on_list")
+    check("parts in Inventory but absent from the brand's MRP list get their own list",
+          set(notlist["part_no"]) == {"0986AB1240", "DEN-55114"}, str(set(notlist["part_no"])))
+    check("not-on-list rows say the MRP is kept as it is",
+          all("keep" in n.lower() for n in notlist["note"]), str(set(notlist["note"])))
+
+    mrp_side_total = len(same) + len(increase) + len(decrease) + len(fresh) + len(ignored) + len(zero)
     usable = sum(f["usable_rows"] for f in lb["mrp_files"])
-    check("the four lists account for every usable MRP-list row",
-          total == usable, f"{total} listed vs {usable} usable")
-    check("run summary reports the list counts",
+    check("the six MRP-list-side lists account for every usable MRP-list row",
+          mrp_side_total == usable, f"{mrp_side_total} listed vs {usable} usable")
+    check("run summary reports every list's count",
           lb["lists"]["same"]["total"] == len(same)
-          and lb["lists"]["changed"]["total"] == len(changed)
-          and lb["lists"]["new"]["total"] == len(fresh), str(lb["lists"]))
+          and lb["lists"]["increase"]["total"] == len(increase)
+          and lb["lists"]["decrease"]["total"] == len(decrease)
+          and lb["lists"]["new"]["total"] == len(fresh)
+          and lb["lists"]["ignored_new"]["total"] == len(ignored)
+          and lb["lists"]["zero"]["total"] == len(zero)
+          and lb["lists"]["not_on_list"]["total"] == len(notlist), str(lb["lists"]))
     check("lists are brand-filterable",
           {r["brand"] for r in client.get(
-              f"/api/results/{rid2}/changed?brand=DENSO&page_size=500").get_json()["rows"]}
+              f"/api/results/{rid2}/decrease?brand=DENSO&page_size=500").get_json()["rows"]}
           == {"DENSO"})
     dl = client.get(f"/api/download/{rid2}/new")
-    check("new-parts download is named list3_...",
-          "list3_new_parts_not_in_inventory.csv" in dl.headers["Content-Disposition"],
+    check("new-parts download is named list4_...",
+          "list4_new_parts.csv" in dl.headers["Content-Disposition"],
           dl.headers["Content-Disposition"])
+    check("available_quantity is present and populated where stock exists",
+          get(increase, "0986AB1234")["available_quantity"] == "15",   # 12 + 3, summed
+          val(get(increase, "0986AB1234"), "available_quantity"))
 
     # ------------------------------------------------ XLSX MRP list
     print("\nXLSX MRP list (multi-sheet, letterhead rows, numeric cells)")
@@ -442,10 +472,14 @@ def main():
     check("a list whose parts match nothing under that brand raises the alarm",
           r["ok"] and len(r["brand_mismatch"]) == 1, str(r.get("brand_mismatch")))
     check("the alarm says how many part numbers failed to match",
-          "not one of the 7 part numbers" in r["brand_mismatch"][0], str(r["brand_mismatch"]))
-    check("every part of a wrong-brand list reads as new",
-          r["lists"]["new"]["total"] == 7 and r["lists"]["same"]["total"] == 0,
-          str(r["lists"]["new"]["total"]))
+          "not one of the 8 part numbers" in r["brand_mismatch"][0], str(r["brand_mismatch"]))
+    # Under the wrong brand, nothing in Inventory matches, so every bosch row
+    # reads as "new" - except the two whose own MRP is 0 (WIPER BLADE and
+    # SEALANT DRUM), which are ignored rather than listed either way.
+    check("every priced part of a wrong-brand list reads as new; no-MRP ones are ignored",
+          r["lists"]["new"]["total"] == 6 and r["lists"]["same"]["total"] == 0
+          and r["lists"]["ignored_new"]["total"] == 2,
+          str({k: r["lists"][k]["total"] for k in ("new", "same", "ignored_new")}))
 
     r = client.post("/api/run", json={
         "inventory_file_id": inv2["file_id"], "stock_file_id": None,
@@ -628,8 +662,9 @@ def main():
     check("every result set has an explicit client-side download filename",
           all(name in appjs for name in [
               "step1_inventory_vs_mrp_issues.csv", "step2_final_issues_after_stock_check.csv",
-              "list1_matched_same_mrp.csv", "list2_mrp_changed_old_vs_new.csv",
-              "list3_new_parts_not_in_inventory.csv", "list4_mrp_list_shows_zero.csv"]))
+              "list1_same_mrp.csv", "list2_mrp_increase.csv", "list3_mrp_decrease.csv",
+              "list4_new_parts.csv", "list5_ignored_new_parts_no_mrp.csv",
+              "list6_existing_part_no_mrp.csv", "list7_not_on_supplier_list.csv"]))
     check("the download anchor's filename is not left blank",
           "download: '' }" not in appjs and "download: filename" in appjs)
 
