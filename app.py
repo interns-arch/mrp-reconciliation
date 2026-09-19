@@ -668,14 +668,27 @@ def api_download(run_id: str, step: str):
     filename, columns = RESULT_SETS[step]
     df = run[step]
 
-    # Honour the on-screen filters when the user asks for the filtered view.
+    # Honour the on-screen filters/sort when the user asks for the filtered
+    # view - brand, issue type AND the search box, the same three the visible
+    # table applies. Previously only brand/issue_type were honoured here, so a
+    # search-box filter (or, for the main "Download CSV" button, ANY filter at
+    # all) silently vanished on download while still showing filtered on screen.
     if request.args.get("filtered") == "1":
         brand = (request.args.get("brand") or "").strip()
         issue = (request.args.get("issue_type") or "").strip()
+        query = (request.args.get("q") or "").strip().upper()
         if brand:
             df = df[df["brand"] == brand]
         if issue and "issue_type" in df.columns:
             df = df[df["issue_type"] == issue]
+        if query:
+            mask = (df["part_no"].astype(str).str.upper().str.contains(query, regex=False)
+                    | df["part_name"].astype(str).str.upper().str.contains(query, regex=False))
+            df = df[mask]
+        sort = request.args.get("sort") or ""
+        if sort in columns:
+            df = df.sort_values(sort, ascending=(request.args.get("dir", "asc") != "desc"),
+                                kind="stable", na_position="last")
 
     out = df[columns].copy()
     for col in ("mrp_inventory", "mrp_official", "mrp", "mrp_old", "mrp_new",

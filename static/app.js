@@ -791,13 +791,20 @@ function makeTable(step) {
     ui.tbody.append(frag);
   }
 
-  function download(filtered) {
+  // `all: true` -> every row, ignoring whatever is on screen. `all: false`
+  // (the default, main "Download CSV" button) -> exactly what the table is
+  // currently showing: same brand/issue-type/search filters and sort as the
+  // preview. Previously the main button always downloaded everything even
+  // with an active filter, so the preview and the file did not match.
+  function download(all) {
     if (!state.runId) return;
     const p = new URLSearchParams();
-    if (filtered) {
+    if (!all) {
       p.set('filtered', '1');
       if (ui.brand.value) p.set('brand', ui.brand.value);
       if (ui.issue.value) p.set('issue_type', ui.issue.value);
+      if (ui.q.value.trim()) p.set('q', ui.q.value.trim());
+      if (sort) { p.set('sort', sort); p.set('dir', dir); }
     }
     // A temporary <a download> rather than location.assign, so a browser that
     // decides to render the CSV instead of saving it can't navigate the app away.
@@ -805,7 +812,9 @@ function makeTable(step) {
     // saves a real .csv file even if a proxy in front of a hosted deployment
     // strips or rewrites the server's Content-Disposition header.
     const base = DOWNLOAD_FILENAMES[stepKey] || `${stepKey}.csv`;
-    const filename = filtered ? base.replace(/\.csv$/, '_filtered.csv') : base;
+    const activelyFiltered = !all && Boolean(
+      ui.brand.value || ui.issue.value || ui.q.value.trim() || sort);
+    const filename = activelyFiltered ? base.replace(/\.csv$/, '_filtered.csv') : base;
     const a = el('a', { href: `/api/download/${state.runId}/${stepKey}?${p}`, download: filename });
     a.style.display = 'none';
     document.body.append(a);

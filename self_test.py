@@ -297,6 +297,35 @@ def main():
     check("download sets a filename",
           "step2_final_issues_after_stock_check.csv" in dl.headers["Content-Disposition"])
 
+    # The reported bug: the preview correctly filters to one issue_type, but the
+    # download of that same view used to ignore the filter (or, for the search
+    # box specifically, always ignored it even when explicitly "filtered").
+    dl = client.get(f"/api/download/{rid}/step1?filtered=1&issue_type=MRP_MISMATCH")
+    mismatch_csv = rows_of(dl.get_data(as_text=True))
+    check("a filtered Step 1 download by issue_type contains ONLY that issue_type",
+          not mismatch_csv.empty and set(mismatch_csv["issue_type"]) == {"MRP_MISMATCH"},
+          str(set(mismatch_csv["issue_type"])) if not mismatch_csv.empty else "(empty)")
+    check("a filtered download never contains an issue_type outside the one requested",
+          "MISSING_IN_INVENTORY" not in set(mismatch_csv["issue_type"])
+          and "MISSING_IN_MRP_LIST" not in set(mismatch_csv["issue_type"]))
+
+    dl = client.get(f"/api/download/{rid}/step1?filtered=1&q=oil")
+    check("a filtered download also honours the search box (previously ignored entirely)",
+          not rows_of(dl.get_data(as_text=True)).empty
+          and all("OIL" in n.upper() for n in rows_of(dl.get_data(as_text=True))["part_name"]),
+          str(rows_of(dl.get_data(as_text=True))["part_name"].tolist()))
+
+    dl = client.get(f"/api/download/{rid}/step1?filtered=1&sort=part_no&dir=desc")
+    dl_parts = rows_of(dl.get_data(as_text=True))["part_no"].tolist()
+    check("a filtered download also honours the on-screen sort order",
+          dl_parts == sorted(dl_parts, reverse=True), str(dl_parts))
+
+    _appjs_now = client.get("/static/app.js").get_data(as_text=True)
+    check("the main Download CSV button now sends the active filters, not just 'Download all'",
+          "activelyFiltered" in _appjs_now and "!all &&" in _appjs_now)
+    check("the 'download everything' button is relabelled, not just a hidden default",
+          "Download all" in open(os.path.join(HERE, "static", "index.html"), encoding="utf-8").read())
+
     # ------------------------------------------------ per-brand lists
     print()
     print("Per-brand lists: same / increase / decrease / new / ignored / zero / not-on-list")
